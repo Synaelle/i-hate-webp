@@ -29,9 +29,15 @@ function createContextMenu() {
 
 async function handleImageClick(info, tab) {
   try {
-    const source = await getSourceBlob(info, tab);
+    const [source, pageFilenameHint] = await Promise.all([
+      getSourceBlob(info, tab),
+      getPageFilenameHint(info, tab)
+    ]);
     const downloadUrl = await convertBlobToPngDataUrl(source.blob);
-    const filename = buildFilename(info.srcUrl, source.filenameHint);
+    const filename = buildFilename(
+      info.srcUrl,
+      pageFilenameHint || source.filenameHint
+    );
 
     await chrome.downloads.download({
       url: downloadUrl,
@@ -45,6 +51,26 @@ async function handleImageClick(info, tab) {
       "Could not save that image as PNG.",
       error instanceof Error ? error.message : String(error)
     );
+  }
+}
+
+async function getPageFilenameHint(info, tab) {
+  if (!tab?.id) {
+    return null;
+  }
+
+  try {
+    const messageOptions = Number.isInteger(info.frameId) ? {
+      frameId: info.frameId
+    } : {};
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "GET_IMAGE_FILENAME_HINT",
+      srcUrl: info.srcUrl
+    }, messageOptions);
+
+    return response?.filenameHint || null;
+  } catch {
+    return null;
   }
 }
 
@@ -65,8 +91,8 @@ async function getSourceBlob(info, tab) {
     return {
       blob: await response.blob(),
       filenameHint: getContentDispositionFilename(response.headers.get("content-disposition")) ||
-        getFilenameFromUrl(info.srcUrl) ||
-        getFilenameFromUrl(response.url)
+        getFilenameFromUrl(response.url) ||
+        getFilenameFromUrl(info.srcUrl)
     };
   } catch (error) {
     if (tab?.id) {

@@ -1,5 +1,17 @@
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "GET_IMAGE_BLOB" || !message.srcUrl) {
+  if (!message?.srcUrl) {
+    return undefined;
+  }
+
+  if (message.type === "GET_IMAGE_FILENAME_HINT") {
+    const image = findImage(message.srcUrl);
+    sendResponse({
+      filenameHint: image ? getExplicitImageFilenameHint(image) : null
+    });
+    return undefined;
+  }
+
+  if (message.type !== "GET_IMAGE_BLOB") {
     return undefined;
   }
 
@@ -44,8 +56,8 @@ async function fetchImageBlob(srcUrl) {
     return {
       blob: await response.blob(),
       filenameHint: getContentDispositionFilename(response.headers.get("content-disposition")) ||
-        getFilenameFromUrl(srcUrl) ||
-        getFilenameFromUrl(response.url)
+        getFilenameFromUrl(response.url) ||
+        getFilenameFromUrl(srcUrl)
     };
   } catch {
     return null;
@@ -77,11 +89,15 @@ function findImage(srcUrl) {
 }
 
 function getImageFilenameHint(image) {
-  const explicitName = image.dataset.filename ||
-    image.dataset.fileName ||
-    image.closest("a[download]")?.getAttribute("download");
+  const explicitName = getExplicitImageFilenameHint(image);
 
   return explicitName || getFilenameFromUrl(image.currentSrc) || getFilenameFromUrl(image.src);
+}
+
+function getExplicitImageFilenameHint(image) {
+  return image.dataset.filename ||
+    image.dataset.fileName ||
+    image.closest("a[download]")?.getAttribute("download");
 }
 
 function getFilenameFromUrl(value) {
