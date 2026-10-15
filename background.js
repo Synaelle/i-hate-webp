@@ -34,10 +34,11 @@ async function handleImageClick(info, tab) {
       getPageFilenameHint(info, tab)
     ]);
     const downloadUrl = await convertBlobToPngDataUrl(source.blob);
-    const filename = buildFilename(
-      info.srcUrl,
-      pageFilenameHint || source.filenameHint
-    );
+    const filename = buildFilename([
+      pageFilenameHint,
+      source.filenameHint,
+      getFilenameFromUrl(info.srcUrl)
+    ]);
 
     await chrome.downloads.download({
       url: downloadUrl,
@@ -174,11 +175,46 @@ async function showNotification(title, message) {
   });
 }
 
-function buildFilename(imageUrl, filenameHint) {
-  const originalName = filenameHint || getFilenameFromUrl(imageUrl) || "image";
-  const nameWithoutExtension = originalName.replace(/\.[^.]+$/, "") || "image";
+const GENERIC_FILENAMES = new Set([
+  "download", "downloads", "image", "images", "img", "file", "files", "media",
+  "photo", "picture", "pic", "view", "raw", "original", "get", "fetch", "attachment",
+  "index", "default", "unknown", "untitled", "blob", "content", "data", "src", "thumb",
+  "thumbnail", "preview", "proxy", "render", "asset", "assets", "static", "public"
+]);
 
-  return `${sanitizeFilename(nameWithoutExtension)}.png`;
+function buildFilename(candidates) {
+  for (const candidate of candidates) {
+    const name = cleanFilenameCandidate(candidate);
+
+    if (name) {
+      return `${name}.png`;
+    }
+  }
+
+  return `${getTimestampFilename()}.png`;
+}
+
+function cleanFilenameCandidate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const nameWithoutExtension = value.replace(/\.[^.]+$/, "");
+  const sanitized = sanitizeFilename(nameWithoutExtension);
+
+  if (!sanitized || GENERIC_FILENAMES.has(sanitized.toLowerCase())) {
+    return null;
+  }
+
+  return sanitized;
+}
+
+function getTimestampFilename() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_` +
+    `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
 }
 
 function sanitizeFilename(name) {
@@ -186,11 +222,11 @@ function sanitizeFilename(name) {
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/[. ]+$/, "")
+    .replace(/^[. ]+|[. ]+$/g, "")
     .slice(0, 200);
 
-  if (!sanitized || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(sanitized)) {
-    return "image";
+  if (!sanitized || /^_*$/.test(sanitized) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(sanitized)) {
+    return null;
   }
 
   return sanitized;
