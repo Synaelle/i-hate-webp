@@ -1,0 +1,301 @@
+const MENU_ID = "save-image-as-png";
+const NOTIFICATION_ID = "save-image-as-png-status";
+
+chrome.runtime.onInstalled.addListener(() => {
+  createContextMenu();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  createContextMenu();
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== MENU_ID || !info.srcUrl) {
+    return;
+  }
+
+  void handleImageClick(info, tab);
+});
+
+function createContextMenu() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: MENU_ID,
+      title: "Save image as PNG",
+      contexts: ["image"]
+    });
+  });
+}
+
+async function handleImageClick(info, tab) {
+  try {
+    const [source, pageFilenameHint] = await Promise.all([
+      getSourceBlob(info, tab),
+      getPageFilenameHint(info, tab)
+    ]);
+    const pngBlob = await convertBlobToPng(source.blob);
+    const filename = buildFilename([
+      pageFilenameHint,
+      source.filenameHint,
+      getFilenameFromUrl(info.srcUrl)
+    ]);
+
+    await downloadBlob(pngBlob, filename);
+  } catch (error) {
+    if (isUserCancellation(error)) {
+      return;
+    }
+
+    console.error("Failed to save image as PNG:", error);
+    await showNotification(
+      "Could not save that image as PNG.",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+
+async function getPageFilenameHint(info, tab) {
+  if (!tab?.id) {
+    return null;
+  }
+
+  try {
+    const messageOptions = Number.isInteger(info.frameId) ? {
+      frameId: info.frameId
+    } : {};
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "GET_IMAGE_FILENAME_HINT",
+      srcUrl: info.srcUrl
+    }, messageOptions);
+
+    return response?.filenameHint || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getSourceBlob(info, tab) {
+  if (info.srcUrl.startsWith("blob:")) {
+    return getBlobFromPageContext(info, tab);
+  }
+
+  try {
+    const response = await fetch(info.srcUrl, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      throw new Error(`Image request failed with status ${response.status}.`);
+    }
+
+    return {
+      blob: await response.blob(),
+      filenameHint: getContentDispositionFilename(response.headers.get("content-disposition")) ||
+        getFilenameFromUrl(response.url) ||
+        getFilenameFromUrl(info.srcUrl)
+    };
+  } catch (error) {
+    if (tab?.id) {
+      return getBlobFromPageContext(info, tab, error);
+    }
+
+    throw error;
+  }
+}
+
+async function getBlobFromPageContext(info, tab, originalError) {
+  if (!tab?.id) {
+    throw originalError ?? new Error("Could not access the page image.");
+  }
+
+  const messageOptions = Number.isInteger(info.frameId) ? {
+    frameId: info.frameId
+  } : {};
+  const response = await chrome.tabs.sendMessage(tab.id, {
+    type: "GET_IMAGE_BLOB",
+    srcUrl: info.srcUrl
+  }, messageOptions);
+
+  if (!response?.ok || !response.blob) {
+    throw new Error(response?.error || originalError?.message || "Could not read the selected image from the page.");
+  }
+
+  const bytes = Uint8Array.from(atob(response.blob), (char) => char.charCodeAt(0));
+
+  return {
+    blob: new Blob([bytes], {
+      type: response.type || "application/octet-stream"
+    }),
+    filenameHint: response.filenameHint
+  };
+}
+
+async function convertBlobToPng(sourceBlob) {
+  const imageBitmap = await createImageBitmap(sourceBlob);
+
+  try {
+    const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Could not create a canvas context.");
+    }
+
+    context.drawImage(imageBitmap, 0, 0);
+
+    const pngBlob = await canvas.convertToBlob({
+      type: "image/png"
+    });
+
+    return pngBlob;
+  } finally {
+    imageBitmap.close();
+  }
+}
+
+// Firefox refuses data: URLs in downloads.download, so hand it a blob URL
+// and revoke it once the download is no longer in progress.
+async function downloadBlob(blob, filename) {
+  const blobUrl = URL.createObjectURL(blob);
+  let downloadId;
+
+  try {
+    downloadId = await chrome.downloads.download({
+      url: blobUrl,
+      filename,
+      saveAs: true,
+      conflictAction: "uniquify"
+    });
+  } catch (error) {
+    URL.revokeObjectURL(blobUrl);
+    throw error;
+  }
+
+  const onChanged = (delta) => {
+    if (delta.id !== downloadId || !delta.state || delta.state.current === "in_progress") {
+      return;
+    }
+
+    chrome.downloads.onChanged.removeListener(onChanged);
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  chrome.downloads.onChanged.addListener(onChanged);
+}
+
+function isUserCancellation(error) {
+  return /cancel/i.test(error instanceof Error ? error.message : String(error));
+}
+
+async function showNotification(title, message) {
+  await chrome.notifications.create(NOTIFICATION_ID, {
+    type: "basic",
+    iconUrl: "icon-128.png",
+    title,
+    message
+  });
+}
+
+const GENERIC_FILENAMES = new Set([
+  "download", "downloads", "image", "images", "img", "file", "files", "media",
+  "photo", "picture", "pic", "view", "raw", "original", "get", "fetch", "attachment",
+  "index", "default", "unknown", "untitled", "blob", "content", "data", "src", "thumb",
+  "thumbnail", "preview", "proxy", "render", "asset", "assets", "static", "public"
+]);
+
+function buildFilename(candidates) {
+  for (const candidate of candidates) {
+    const name = cleanFilenameCandidate(candidate);
+
+    if (name) {
+      return `${name}.png`;
+    }
+  }
+
+  return `${getTimestampFilename()}.png`;
+}
+
+function cleanFilenameCandidate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const nameWithoutExtension = value.replace(/\.[^.]+$/, "");
+  const sanitized = sanitizeFilename(nameWithoutExtension);
+
+  if (!sanitized || GENERIC_FILENAMES.has(sanitized.toLowerCase())) {
+    return null;
+  }
+
+  return sanitized;
+}
+
+function getTimestampFilename() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_` +
+    `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+}
+
+function sanitizeFilename(name) {
+  const sanitized = name
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[. ]+|[. ]+$/g, "")
+    .slice(0, 200);
+
+  if (!sanitized || /^_*$/.test(sanitized) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(sanitized)) {
+    return null;
+  }
+
+  return sanitized;
+}
+
+function getFilenameFromUrl(value) {
+  if (!value || value.startsWith("data:") || value.startsWith("blob:")) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    const pathName = decodeURIComponent(url.pathname.split("/").pop() || "");
+
+    if (/\.[a-z0-9]{2,8}$/i.test(pathName)) {
+      return pathName;
+    }
+
+    for (const key of ["filename", "file", "name", "download"]) {
+      const queryName = url.searchParams.get(key);
+
+      if (queryName) {
+        return decodeURIComponent(queryName.split(/[\\/]/).pop());
+      }
+    }
+
+    return pathName || null;
+  } catch {
+    return null;
+  }
+}
+
+function getContentDispositionFilename(header) {
+  if (!header) {
+    return null;
+  }
+
+  const encodedMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+  const plainMatch = header.match(/filename="([^"]+)"|filename=([^;]+)/i);
+  const value = encodedMatch?.[1] || plainMatch?.[1] || plainMatch?.[2];
+
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(value.trim()).split(/[\\/]/).pop();
+  } catch {
+    return value.trim().split(/[\\/]/).pop();
+  }
+}
