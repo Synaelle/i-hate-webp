@@ -8,6 +8,7 @@ The repository has one folder per browser:
 
 - `chrome/`: Chrome, Edge, Brave and other Chromium browsers
 - `firefox/`: Firefox
+- `tampermonkey/`: a userscript for Tampermonkey or Violentmonkey, in any browser
 
 ## Install on Chrome
 
@@ -32,6 +33,18 @@ This extension is not available on Firefox Add-ons. It must be loaded manually:
 
 Firefox removes temporary add-ons when it restarts, so you need to load it again after each restart.
 
+## Install with Tampermonkey
+
+If you already use [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/), you can use the userscript instead of the extension:
+
+1. Open [i-hate-webp.user.js](https://raw.githubusercontent.com/Synaelle/i-hate-webp/master/tampermonkey/i-hate-webp.user.js).
+2. Tampermonkey shows an install page. Click **Install**.
+3. The first time you save an image, Tampermonkey asks for permission to download images from other websites. Choose **Always allow all domains**.
+
+To use it, right-click an image, then open the **Tampermonkey** submenu and choose **Save image as PNG**.
+
+In Chrome and Edge, Tampermonkey also requires **Allow User Scripts** to be on. Open the extension's details page from `chrome://extensions` and turn it on.
+
 ## Use
 
 1. Right-click an image on a web page.
@@ -39,3 +52,7 @@ Firefox removes temporary add-ons when it restarts, so you need to load it again
 3. Choose where to save the file.
 
 If no useful name can be found for the image, the file is named with the current date and time, for example `2026-10-16_14-30-05.png`.
+
+## License
+
+[GPL 3.0](LICENSE). You can use, change and share this code, but any modified version you distribute must also be open source under the GPL.
