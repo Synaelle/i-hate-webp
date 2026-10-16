@@ -1,4 +1,4 @@
-# Save Image as PNG
+# I Hate WebP
 
 I hate webP
 
@@ -13,7 +13,7 @@ The repository has one folder per browser:
 
 This extension is not available on the Chrome Web Store. It must be loaded manually:
 
-1. Download `save-image-as-png-chrome.zip` from the [latest release](https://github.com/Synaelle/i-hate-webp/releases/latest) and extract it.
+1. Download `i-hate-webp-chrome.zip` from the [latest release](https://github.com/Synaelle/i-hate-webp/releases/latest) and extract it.
 2. Open Chrome and go to `chrome://extensions`.
 3. Turn on **Developer mode** in the top-right corner.
 4. Click **Load unpacked**.
@@ -25,7 +25,7 @@ You can also clone this repository and select its `chrome` folder in step 5.
 
 This extension is not available on Firefox Add-ons. It must be loaded manually:
 
-1. Download `save-image-as-png-firefox.zip` from the [latest release](https://github.com/Synaelle/i-hate-webp/releases/latest). There is no need to extract it.
+1. Download `i-hate-webp-firefox.zip` from the [latest release](https://github.com/Synaelle/i-hate-webp/releases/latest). There is no need to extract it.
 2. Open Firefox and go to `about:debugging#/runtime/this-firefox`.
 3. Click **Load Temporary Add-on...**.
 4. Select the downloaded ZIP file, or the `manifest.json` inside the `firefox` folder of this repository.
